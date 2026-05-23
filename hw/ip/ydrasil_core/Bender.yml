@@ -1,0 +1,32 @@
+package:
+  name: ydrasil::core
+  description: Core IP for Ydrasil RV32I core
+
+dependencies:
+  ydrasil::memory:
+    path: ../ydrmem
+
+sources:
+  - target: any(verilator, iverilog, vcs)
+    include_dirs:
+      - rtl
+    files:
+      - rtl/ydrasil_alu.sv
+      - rtl/ydrasil_if_stage.sv
+      - rtl/ydrasil_id_stage.sv
+      - rtl/ydrasil_ins_decoder.sv
+      - rtl/yfrasil_mul.sv
+      - rtl/ydrasil_ex_block.sv
+      - rtl/ydrasil_load_store_unit.sv
+      - rtl/ydrasil_mems.sv
+      - rtl/ydrasil_wb_stage.sv
+      - rtl/ydrasil_registers.sv
+      - rtl/ydrasil_registers_csr.sv
+      - rtl/ydrasil_clint.sv
+      - rtl/ydrasil_ctrl.sv
+      - rtl/ydrasil_core.sv
+
+
+  - target: ip_tb
+    files:
+      - dv/ydrasil_core_tb.sv
