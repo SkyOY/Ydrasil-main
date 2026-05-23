@@ -1,0 +1,5 @@
+C++ timeout set to 401000
+PERF_START: NAME=rv32um_rem TOHOST=0x800002c0 TIMEOUT_CYCLES=200000
+
+PERF_METRIC: NAME=rv32um_rem STATUS=PASS CYCLES=327 INSTS=152 IPC=0.4648 TOHOST=0x00000001 PC=0x80000048
+- /home/ydrasil/projects/Ydrasil-main/perf_eval/tb/perf_core_tb.sv:143: Verilog $finish

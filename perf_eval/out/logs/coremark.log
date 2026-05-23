@@ -1,0 +1,5 @@
+C++ timeout set to 100001000
+PERF_START: NAME=coremark TOHOST=0x80002440 TIMEOUT_CYCLES=50000000
+
+PERF_METRIC: NAME=coremark STATUS=FAIL CYCLES=3655 INSTS=3132 IPC=0.8569 TOHOST=0xfffffffe PC=0x800aa2ea
+- /home/ydrasil/projects/Ydrasil-main/perf_eval/tb/perf_core_tb.sv:143: Verilog $finish

@@ -1,0 +1,17 @@
+make: Entering directory '/home/ydrasil/projects/Ydrasil-main/sw'
+make[1]: Entering directory '/home/ydrasil/projects/Ydrasil-main/sw'
+riscv64-elf-gcc -march=rv32im_zicsr_zifencei -mabi=ilp32 -nostdlib -nostartfiles -static -mcmodel=medany -I/home/ydrasil/projects/Ydrasil-main/sw/include -I/home/ydrasil/projects/Ydrasil-main/verif/tests/riscv-tests/env -I/home/ydrasil/projects/Ydrasil-main/verif/tests/riscv-tests/isa/macros/scalar -T linker/link_rvtest.ld /home/ydrasil/projects/Ydrasil-main/verif/tests/riscv-tests/isa/rv32um/div.S  -o /home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/rv32um/elf/rv32um_div.elf
+/usr/lib/gcc/riscv64-elf/15.2.0/../../../../riscv64-elf/bin/ld: warning: /home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/rv32um/elf/rv32um_div.elf has a LOAD segment with RWX permissions
+riscv64-elf-objdump -D /home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/rv32um/elf/rv32um_div.elf > /home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/rv32um/dump/rv32um_div.dump
+# ITCM: text/rodata/tohost
+riscv64-elf-objcopy -O binary --gap-fill=0x00\
+	--only-section=.text --only-section=.text.* --only-section=.rodata --only-section=.rodata.* --only-section=.tohost \
+	/home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/rv32um/elf/rv32um_div.elf /home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/rv32um/bin/rv32um_div_itcm.bin
+# DTCM: data/bss
+riscv64-elf-objcopy -O binary --gap-fill=0x00\
+  --only-section=.data --only-section=.data.* --only-section=.sdata --only-section=.sdata.* --only-section=.bss --only-section=.bss.* --only-section=.sbss --only-section=.sbss.* \
+	--set-section-flags .bss=alloc,load,contents --set-section-flags .sbss=alloc,load,contents \
+  /home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/rv32um/elf/rv32um_div.elf /home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/rv32um/bin/rv32um_div_dtcm.bin || true
+od -An -t x4 -w4 -v /home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/rv32um/bin/rv32um_div_itcm.bin | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$/d' > /home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/rv32um/mem/rv32um_div.itcm
+make[1]: Leaving directory '/home/ydrasil/projects/Ydrasil-main/sw'
+make: Leaving directory '/home/ydrasil/projects/Ydrasil-main/sw'

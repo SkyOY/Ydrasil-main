@@ -1,0 +1,4 @@
+/home/ydrasil/projects/Ydrasil-main/perf_eval/third_party/coremark/core_main.c:109:1: warning: return type of 'main' is not 'int' [-Wmain]
+  109 | main(void)
+      | ^~~~
+/usr/lib/gcc/riscv64-elf/15.2.0/../../../../riscv64-elf/bin/ld: warning: /home/ydrasil/projects/Ydrasil-main/perf_eval/build/elf/coremark/coremark.elf has a LOAD segment with RWX permissions

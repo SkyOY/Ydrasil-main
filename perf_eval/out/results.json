@@ -1,0 +1,185 @@
+{
+  "metadata": {
+    "repo_root": "/home/ydrasil/projects/Ydrasil-main",
+    "eval_root": "/home/ydrasil/projects/Ydrasil-main/perf_eval",
+    "coremark_sha": "1f483d5b8316753a742cbf5590caf5bd0a4e4777",
+    "cpu_mhz": "150",
+    "cc": "riscv64-elf-gcc (Arch Linux Repositories) 15.2.0",
+    "verilator": "Verilator 5.048 2026-04-26 rev v5.048",
+    "bender": "bender 0.31.0"
+  },
+  "benchmarks": [
+    {
+      "name": "coremark",
+      "status": "FAIL",
+      "cycles": 3655,
+      "insts": 3132,
+      "ipc": 0.8569,
+      "tohost": "0xfffffffe",
+      "pc": "0x800aa2ea",
+      "log": "out/logs/coremark.log",
+      "reason": "invalid_pc",
+      "coremark": {
+        "validated": false,
+        "iterations": null,
+        "reported_ticks": null
+      }
+    },
+    {
+      "name": "rv32ui_add",
+      "status": "PASS",
+      "cycles": 557,
+      "insts": 551,
+      "ipc": 0.9892,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32ui_add.log",
+      "reason": null
+    },
+    {
+      "name": "rv32ui_addi",
+      "status": "PASS",
+      "cycles": 316,
+      "insts": 310,
+      "ipc": 0.981,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32ui_addi.log",
+      "reason": null
+    },
+    {
+      "name": "rv32ui_beq",
+      "status": "PASS",
+      "cycles": 405,
+      "insts": 395,
+      "ipc": 0.9753,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32ui_beq.log",
+      "reason": null
+    },
+    {
+      "name": "rv32ui_bne",
+      "status": "PASS",
+      "cycles": 409,
+      "insts": 400,
+      "ipc": 0.978,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32ui_bne.log",
+      "reason": null
+    },
+    {
+      "name": "rv32ui_jal",
+      "status": "PASS",
+      "cycles": 121,
+      "insts": 115,
+      "ipc": 0.9504,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32ui_jal.log",
+      "reason": null
+    },
+    {
+      "name": "rv32ui_ld_st",
+      "status": "PASS",
+      "cycles": 1797,
+      "insts": 1019,
+      "ipc": 0.5671,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32ui_ld_st.log",
+      "reason": null
+    },
+    {
+      "name": "rv32ui_lw",
+      "status": "PASS",
+      "cycles": 429,
+      "insts": 351,
+      "ipc": 0.8182,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32ui_lw.log",
+      "reason": null
+    },
+    {
+      "name": "rv32ui_st_ld",
+      "status": "PASS",
+      "cycles": 741,
+      "insts": 539,
+      "ipc": 0.7274,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32ui_st_ld.log",
+      "reason": null
+    },
+    {
+      "name": "rv32ui_sw",
+      "status": "PASS",
+      "cycles": 752,
+      "insts": 602,
+      "ipc": 0.8005,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32ui_sw.log",
+      "reason": null
+    },
+    {
+      "name": "rv32um_div",
+      "status": "PASS",
+      "cycles": 327,
+      "insts": 152,
+      "ipc": 0.4648,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32um_div.log",
+      "reason": null
+    },
+    {
+      "name": "rv32um_mul",
+      "status": "PASS",
+      "cycles": 1112,
+      "insts": 545,
+      "ipc": 0.4901,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32um_mul.log",
+      "reason": null
+    },
+    {
+      "name": "rv32um_rem",
+      "status": "PASS",
+      "cycles": 327,
+      "insts": 152,
+      "ipc": 0.4648,
+      "tohost": "0x00000001",
+      "pc": "0x80000048",
+      "log": "out/logs/rv32um_rem.log",
+      "reason": null
+    }
+  ],
+  "vivado": {
+    "status": "not_run",
+    "reason": "vivado results not found"
+  },
+  "summary": {
+    "pass_count": 12,
+    "fail_count": 1,
+    "groups": {
+      "rv32ui": {
+        "count": 9,
+        "avg_ipc": 0.8652333333333333,
+        "min_ipc": 0.5671,
+        "max_ipc": 0.9892,
+        "mips_at_150mhz": 129.785
+      },
+      "rv32um": {
+        "count": 3,
+        "avg_ipc": 0.47323333333333334,
+        "min_ipc": 0.4648,
+        "max_ipc": 0.4901,
+        "mips_at_150mhz": 70.985
+      }
+    }
+  }
+}
