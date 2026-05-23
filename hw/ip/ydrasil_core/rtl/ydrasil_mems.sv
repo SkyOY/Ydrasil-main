@@ -33,14 +33,25 @@ module ydrasil_mems (
     wire        dtcm_en;
     wire [3:0]  dtcm_wmask;
 
+    localparam [31:0] DTCM_BYTE_SIZE = (32'd1 << `DTCM_ADDR_WIDTH) << 2;
+
+    wire if_dtcm_sel;
+    wire [`DTCM_ADDR_WIDTH-1:0] if_dtcm_addr;
+    wire [`DTCM_ADDR_WIDTH-1:0] lsu_dtcm_addr;
+
+    assign if_dtcm_sel = (if_mem_addr_i >= `DTCM_BASE_ADDR) &&
+                         (if_mem_addr_i < (`DTCM_BASE_ADDR + DTCM_BYTE_SIZE));
+    assign if_dtcm_addr = if_mem_addr_i[17:2];
+    assign lsu_dtcm_addr = lsu_mem_addr_i[17:2];
+
     assign itcm_addr = if_mem_addr_i[13:2]; // 16KB ITCM，地址对齐到4字节
-    assign dtcm_addr = lsu_mem_addr_i[17:2]; // 256KB DTCM，地址对齐到4字节
-    assign if_mem_rdata_o = itcm_rdata; // 从ITCM读取指令
+    assign dtcm_addr = lsu_mem_req_i ? lsu_dtcm_addr : if_dtcm_addr; // LSU优先，空闲时允许DTCM取指
+    assign if_mem_rdata_o = if_dtcm_sel ? dtcm_rdata : itcm_rdata; // 从ITCM或DTCM读取指令
     assign lsu_mem_data_o = dtcm_rdata; // 从DTCM读取
 
-    assign dtcm_en      = lsu_mem_req_i ; 
+    assign dtcm_en      = lsu_mem_req_i | if_dtcm_sel;
     assign dtcm_wdata   = lsu_mem_data_i; // 写入DTCM的数据
-    assign dtcm_wen     = lsu_mem_we_i; // DTCM写使能
+    assign dtcm_wen     = lsu_mem_req_i & lsu_mem_we_i; // DTCM写使能
     assign dtcm_wmask   = lsu_mem_wmask_i; // DTCM写
 
     itcm u_itcm (

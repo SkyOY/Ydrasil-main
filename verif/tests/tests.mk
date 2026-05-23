@@ -86,10 +86,17 @@ rv_sim_%:
 	base=$${name#*_}; \
 	mem_dir=$(RVTESTS_OUT_ROOT)/$$typ/mem; \
 	result_dir=$(RVTESTS_RESULT_DIR)/$$typ; \
+	itcm_file=$$mem_dir/$$base.itcm; \
+	dtcm_file=$$mem_dir/$$base.dtcm; \
+	if [ ! -f $$itcm_file ] || [ ! -f $$dtcm_file ]; then \
+		echo "ERROR: missing mem files for $$typ/$$base"; \
+		echo "       expected $$itcm_file and $$dtcm_file"; \
+		exit 1; \
+	fi; \
 	mkdir -p $$result_dir; \
 	$(MAKE) LOG_OUTPUT=0 Compile_optimization=0 sim \
-		ITCM_FILE=$$mem_dir/$$base.itcm \
-		DTCM_FILE=$$mem_dir/$$base.dtcm \
+		ITCM_FILE=$$itcm_file \
+		DTCM_FILE=$$dtcm_file \
 		> $$result_dir/$$base.log 2>&1; \
 	cycles=$$(grep -o "CYCLES=[0-9]*" $$result_dir/$$base.log | cut -d= -f2); \
 	insts=$$(grep -o "INSTS=[0-9]*" $$result_dir/$$base.log | cut -d= -f2); \
@@ -107,8 +114,12 @@ rv_test_report_all: $(RVTESTS_REPORT_TARGETS)
 rv_report_%:
 	@typ=$*; \
 	result_dir=$(RVTESTS_RESULT_DIR)/$$typ; \
+	mem_dir=$(RVTESTS_OUT_ROOT)/$$typ/mem; \
 	echo "========== $$typ =========="; \
-	for f in $$(ls $$result_dir/*.status 2>/dev/null | sort); do \
+	for mem in $$(ls $$mem_dir/*.itcm 2>/dev/null | sort); do \
+		base=$$(basename $$mem .itcm); \
+		f=$$result_dir/$$base.status; \
+		[ -e "$$f" ] || { echo "[$$typ/$$base] [ MISSING ]"; continue; }; \
 		line=$$(cat $$f); \
 		left=$$(echo "$$line" | sed 's/\(.*\)\(\[Cycles:.*\]\)\( \[ [A-Z]* \]\)/\1/'); \
 		mid=$$(echo "$$line" | sed 's/\(.*\)\(\[Cycles:.*\]\)\( \[ [A-Z]* \]\)/\2/'); \
@@ -125,12 +136,13 @@ rv_test_summary_all: $(RVTESTS_SUMMARY_TARGETS)
 rv_summary_%:
 	@typ=$*; \
 	result_dir=$(RVTESTS_RESULT_DIR)/$$typ; \
+	mem_dir=$(RVTESTS_OUT_ROOT)/$$typ/mem; \
 	summary_file=$(RVTESTS_RESULT_DIR)/$${typ}_summary.log; \
 	rm -f $$summary_file; \
-	for log in $$result_dir/*.log; do \
-		[ -e "$$log" ] || continue; \
-		base=$$(basename $$log .log); \
-		if grep -q "TEST_PASS" $$log; then \
+	for mem in $$(ls $$mem_dir/*.itcm 2>/dev/null | sort); do \
+		base=$$(basename $$mem .itcm); \
+		log=$$result_dir/$$base.log; \
+		if [ -e "$$log" ] && grep -q "TEST_PASS" $$log; then \
 			echo "$$base: PASS" >> $$summary_file; \
 		else \
 			echo "$$base: FAIL" >> $$summary_file; \

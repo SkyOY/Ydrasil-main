@@ -67,11 +67,15 @@
 `define OP_SYS_EBREAK        1
 `define OP_SYS_MRET          2
 
-`define OP_MUL_INFO_WIDTH   4
+`define OP_MUL_INFO_WIDTH   8
 `define OP_MUL_MUL          0
 `define OP_MUL_MULH         1
 `define OP_MUL_MULHSU       2
 `define OP_MUL_MULHU        3
+`define OP_MUL_DIV          4
+`define OP_MUL_DIVU         5
+`define OP_MUL_REM          6
+`define OP_MUL_REMU         7
 
 `define OPSEL_INFO_WIDTH 3
 `define ASELRS 0

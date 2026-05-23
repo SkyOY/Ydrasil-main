@@ -54,13 +54,21 @@ module ydrasil_ex_block #(
 	wire [`REGS_DATA_WIDTH-1:0]     alu_result;
 	wire                            alu_rf_wen_rd;
 	wire [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd;
+	wire                            op_m_unit;
 	wire                            op_mul;
+	wire                            op_div;
 	wire                            mul_start;
 	wire                            mul_busy;
 	wire                            mul_done;
 	wire [`DOUBLE_REGS_WIDTH-1:0]   mul_result;
 	wire [`REGS_DATA_WIDTH-1:0]     mul_wb_result;
-	wire                            mul_rf_wen_rd;
+	wire                            div_start;
+	wire                            div_busy;
+	wire                            div_done;
+	wire [`REGS_DATA_WIDTH-1:0]     div_result;
+	wire                            m_done;
+	wire [`REGS_DATA_WIDTH-1:0]     m_wb_result;
+	wire                            m_rf_wen_rd;
 	wire                            normal_alu_rf_wen_rd;
 	wire                            ex_rf_wen_rd;
 
@@ -107,12 +115,21 @@ module ydrasil_ex_block #(
 	assign ex_lsu_result_o = alu_result_ff ;
 
 	assign ex_branch_jump_o = ex_branch_jump | interrupt_i;
-	assign op_mul = operator_type_i[`OPERATOR_TYPE_MUL];
+	assign op_m_unit = operator_type_i[`OPERATOR_TYPE_MUL];
+	assign op_mul = op_m_unit &
+					(operator_i[`OP_MUL_MUL] | operator_i[`OP_MUL_MULH] |
+					 operator_i[`OP_MUL_MULHSU] | operator_i[`OP_MUL_MULHU]);
+	assign op_div = op_m_unit &
+					(operator_i[`OP_MUL_DIV] | operator_i[`OP_MUL_DIVU] |
+					 operator_i[`OP_MUL_REM] | operator_i[`OP_MUL_REMU]);
 	assign mul_start = op_mul & !mul_busy & !mul_done & !interrupt_i;
-	assign ex_mul_stall_o = op_mul & !mul_done;
+	assign div_start = op_div & !div_busy & !div_done & !interrupt_i;
+	assign m_done = (op_mul & mul_done) | (op_div & div_done);
+	assign ex_mul_stall_o = op_m_unit & !m_done;
 	assign mul_wb_result = operator_i[`OP_MUL_MUL] ? mul_result[31:0] : mul_result[63:32];
-	assign mul_rf_wen_rd = mul_done & id_alu_rf_wen_rd_i & !interrupt_i;
-	assign normal_alu_rf_wen_rd = alu_rf_wen_rd & !op_mul;
+	assign m_wb_result = op_div ? div_result : mul_wb_result;
+	assign m_rf_wen_rd = m_done & id_alu_rf_wen_rd_i & !interrupt_i;
+	assign normal_alu_rf_wen_rd = alu_rf_wen_rd & !op_m_unit;
 
 	ydrasil_alu #(
 		.DATAWIDTH(DATA_WIDTH)
@@ -145,6 +162,19 @@ module ydrasil_ex_block #(
 		.result_o        (mul_result)
 	);
 
+	ydrasil_div u_ydrasil_div (
+		.clk             (clk),
+		.rst_n           (rst_n),
+		.flush_i         (flush_ex_i | interrupt_i),
+		.start_i         (div_start),
+		.operand_a_i     (operand_a),
+		.operand_b_i     (operand_b),
+		.operator_i      (operator_i),
+		.busy_o          (div_busy),
+		.done_o          (div_done),
+		.result_o        (div_result)
+	);
+
 	wire [31:0] alu_csr_result;
 	wire csr_wen;
 
@@ -175,7 +205,7 @@ module ydrasil_ex_block #(
                           	({`REGS_DATA_WIDTH{csr_csrrs}} & (operand_a | csr_ex_rdata_i)) |
                           	({`REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a)));
 	assign csr_wen = op_csr;
-	assign ex_rf_wen_rd = mul_rf_wen_rd | normal_alu_rf_wen_rd | csr_wen;
+	assign ex_rf_wen_rd = m_rf_wen_rd | normal_alu_rf_wen_rd | csr_wen;
 	
 	always_ff @(posedge clk or negedge rst_n) begin
 		if(!rst_n) begin
@@ -197,7 +227,7 @@ module ydrasil_ex_block #(
 			else begin
 				alu_result_ff <= alu_csr_result;
 				alu_rf_wen_rd_ff <= ex_rf_wen_rd;
-				alu_rf_waddr_rd_ff <= mul_rf_wen_rd ? id_rf_waddr_rd_i : alu_rf_waddr_rd;
+				alu_rf_waddr_rd_ff <= m_rf_wen_rd ? id_rf_waddr_rd_i : alu_rf_waddr_rd;
 				ex_csr_wdata_o_ff <= csr_wdata;
 				ex_csr_wen_o_ff <= csr_wen;
 				ex_csr_waddr_o_ff <= id_ex_csr_waddr_i;
@@ -207,7 +237,7 @@ module ydrasil_ex_block #(
 	assign ex_csr_wdata_o = ex_csr_wdata_o_ff;
 	assign ex_csr_wen_o = ex_csr_wen_o_ff;
 	assign ex_csr_waddr_o = ex_csr_waddr_o_ff;
-	assign alu_csr_result = ({32{mul_rf_wen_rd}} & mul_wb_result) |
+	assign alu_csr_result = ({32{m_rf_wen_rd}} & m_wb_result) |
 							({32{csr_wen}} & csr_reg_wdata )|
 							({32{normal_alu_rf_wen_rd} }& alu_result) ;
 

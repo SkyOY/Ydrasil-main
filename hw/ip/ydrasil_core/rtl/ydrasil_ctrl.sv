@@ -9,6 +9,7 @@ module ydrasil_ctrl (
     
     input wire                           lsu_ctrl_stall_i, // LSU 可能会因为等待内存响应而请求stall
     input wire                           lsu_ctrl_stall_wb_i, // LSU 可能会因为异常等原因
+    input wire                           lsu_ctrl_busy_i,
     input wire [`REGS_ADDR_WIDTH-1:0]    lsu_ctrl_waddr_rd_i,
     input wire [`REGS_ADDR_WIDTH-1:0]    lsu_ctrl_waddr_rd_wb_i,
 
@@ -37,7 +38,7 @@ module ydrasil_ctrl (
     wire lsu_stall_rs_rd_wb;
 
     wire lsu_stall ;
-    assign lsu_stall = lsu_stall_rs_rd | lsu_stall_rs_rd_wb;
+    assign lsu_stall = lsu_ctrl_busy_i | lsu_stall_rs_rd | lsu_stall_rs_rd_wb;
 
     assign branch_target_o = ex_branch_target_i;
     assign branch_jump_o = ex_branch_jump_i;

@@ -177,6 +177,10 @@ module ydrasil_ins_decoder #(
 	wire is_mulh  ;
 	wire is_mulhsu;
 	wire is_mulhu ;
+	wire is_div   ;
+	wire is_divu  ;
+	wire is_rem   ;
+	wire is_remu  ;
 
 	assign is_shift = is_slli | is_srli | is_srai;
 	assign is_add   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
@@ -193,10 +197,15 @@ module ydrasil_ins_decoder #(
 	assign is_mulh  = is_op_r_m & (funct3 == `RV32I_INS_MULH) 		& funct7_is_0000001;
 	assign is_mulhsu= is_op_r_m & (funct3 == `RV32I_INS_MULHSU) 	& funct7_is_0000001;
 	assign is_mulhu = is_op_r_m & (funct3 == `RV32I_INS_MULHU) 		& funct7_is_0000001;
+	assign is_div   = is_op_r_m & (funct3 == `RV32I_INS_DIV) 		& funct7_is_0000001;
+	assign is_divu  = is_op_r_m & (funct3 == `RV32I_INS_DIVU) 		& funct7_is_0000001;
+	assign is_rem   = is_op_r_m & (funct3 == `RV32I_INS_REM) 		& funct7_is_0000001;
+	assign is_remu  = is_op_r_m & (funct3 == `RV32I_INS_REMU) 		& funct7_is_0000001;
 
 	wire is_r_alu_use = is_add | is_sub | is_sll | is_slt | is_sltu |
 	                    is_xor | is_srl | is_sra | is_or | is_and;
-	wire is_mul_use = is_mul | is_mulh | is_mulhsu | is_mulhu;
+	wire is_mul_use = is_mul | is_mulh | is_mulhsu | is_mulhu |
+	                  is_div | is_divu | is_rem | is_remu;
 
 	wire is_fence  ;
 	wire is_fence_i;
@@ -273,6 +282,10 @@ module ydrasil_ins_decoder #(
 	assign mul_op_info[`OP_MUL_MULH]   = is_mulh;
 	assign mul_op_info[`OP_MUL_MULHSU] = is_mulhsu;
 	assign mul_op_info[`OP_MUL_MULHU]  = is_mulhu;
+	assign mul_op_info[`OP_MUL_DIV]    = is_div;
+	assign mul_op_info[`OP_MUL_DIVU]   = is_divu;
+	assign mul_op_info[`OP_MUL_REM]    = is_rem;
+	assign mul_op_info[`OP_MUL_REMU]   = is_remu;
 
 
 	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
@@ -314,9 +327,9 @@ module ydrasil_ins_decoder #(
 
 	assign imm_i_o = imm_i_mask | imm_s_mask | imm_b_mask | imm_u_mask | imm_j_mask | imm_shamt_mask | imm_csr_mask;
 
-	assign operator_o = ({`OPERATOR_WIDTH{is_alu_use }}& {{0{1'b0}},alu_op_info})|
-						({`OPERATOR_WIDTH{is_bjp_use }}& {{5{1'b0}},bjp_op_info}) |
-						({`OPERATOR_WIDTH{is_mul_use }}& {{8{1'b0}},mul_op_info});
+	assign operator_o = ({`OPERATOR_WIDTH{is_alu_use }}& {{(`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH){1'b0}},alu_op_info})|
+						({`OPERATOR_WIDTH{is_bjp_use }}& {{(`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH){1'b0}},bjp_op_info}) |
+						({`OPERATOR_WIDTH{is_mul_use }}& {{(`OPERATOR_WIDTH-`OP_MUL_INFO_WIDTH){1'b0}},mul_op_info});
 	assign operator_lsu_o = lsu_op_info;
 
 	wire operand_b_rs_sel 	;

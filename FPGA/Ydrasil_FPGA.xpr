@@ -252,6 +252,13 @@
           <Attr Name="UsedIn" Val="simulation"/>
         </FileInfo>
       </File>
+      <File Path="$PPRDIR/../hw/ip/ydrasil_core/rtl/ydrasil_div.sv">
+        <FileInfo>
+          <Attr Name="UsedIn" Val="synthesis"/>
+          <Attr Name="UsedIn" Val="implementation"/>
+          <Attr Name="UsedIn" Val="simulation"/>
+        </FileInfo>
+      </File>
       <File Path="$PPRDIR/../hw/ip/ydrasil_core/rtl/ydrasil_ins_decoder.sv">
         <FileInfo>
           <Attr Name="UsedIn" Val="synthesis"/>
