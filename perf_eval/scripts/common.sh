@@ -25,6 +25,7 @@ NM="${NM:-${RISCV_PREFIX}-nm}"
 VERILATOR="${VERILATOR:-verilator}"
 BENDER="${BENDER:-bender}"
 PYTHON="${PYTHON:-python3}"
+MUL_IMPL="${MUL_IMPL:-4cycle}"
 
 ARCH="${ARCH:-rv32im_zicsr}"
 ABI="${ABI:-ilp32}"
@@ -58,5 +59,6 @@ write_metadata() {
         echo "cc=$("${CC}" --version | sed -n '1p')"
         echo "verilator=$("${VERILATOR}" --version | sed -n '1p')"
         echo "bender=$("${BENDER}" --version | sed -n '1p')"
+        echo "mul_impl=${MUL_IMPL}"
     } > "${OUT_DIR}/metadata.env"
 }

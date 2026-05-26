@@ -6,6 +6,18 @@ need_tool "${BENDER}"
 
 FLIST_FILE="${FLIST_DIR}/ydrasil_core_verilator.f"
 
+case "${MUL_IMPL}" in
+    4cycle)
+        mul_define="-DYDRASIL_MUL_IMPL_4CYCLE"
+        ;;
+    radix8)
+        mul_define="-DYDRASIL_MUL_IMPL_RADIX8"
+        ;;
+    *)
+        die "unsupported MUL_IMPL '${MUL_IMPL}', use 4cycle or radix8"
+        ;;
+esac
+
 (
     cd "${REPO_ROOT}/hw/ip/ydrasil_core"
     "${BENDER}" script flist-plus -t verilator | sed '/^+define+/d' > "${FLIST_FILE}"
@@ -20,6 +32,7 @@ FLIST_FILE="${FLIST_DIR}/ydrasil_core_verilator.f"
     -j "$(nproc)" \
     --top-module perf_core_tb \
     -Wno-fatal -Wno-TIMESCALEMOD -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-WIDTHCONCAT -Wno-UNOPTFLAT \
+    "${mul_define}" \
     -I"${REPO_ROOT}/hw/ip/ydrasil_core/rtl" \
     -f "${FLIST_FILE}" \
     "${EVAL_ROOT}/tb/perf_core_tb.sv" \

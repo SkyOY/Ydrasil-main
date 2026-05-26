@@ -1,3 +1,4 @@
+`include "config.svh"
 `include "define_decode.svh"
 `include "define_mem_reg.svh"
 
@@ -16,6 +17,22 @@ module ydrasil_mul (
     output wire [`DOUBLE_REGS_WIDTH-1:0]   result_o
 );
 
+    wire op_mulh   = operator_i[`OP_MUL_MULH];
+    wire op_mulhsu = operator_i[`OP_MUL_MULHSU];
+
+    wire operand_a_signed = op_mulh | op_mulhsu;
+    wire operand_b_signed = op_mulh;
+
+`ifdef YDRASIL_MUL_IMPL_RADIX8
+
+    wire operand_a_neg    = operand_a_signed & operand_a_i[`REGS_DATA_WIDTH-1];
+    wire operand_b_neg    = operand_b_signed & operand_b_i[`REGS_DATA_WIDTH-1];
+
+    wire [`REGS_DATA_WIDTH-1:0] operand_a_abs =
+        operand_a_neg ? (~operand_a_i + `REGS_DATA_WIDTH'd1) : operand_a_i;
+    wire [`REGS_DATA_WIDTH-1:0] operand_b_abs =
+        operand_b_neg ? (~operand_b_i + `REGS_DATA_WIDTH'd1) : operand_b_i;
+
     localparam [3:0] MUL_ITER_LAST = 4'd10;
 
     reg                            busy_q;
@@ -33,19 +50,6 @@ module ydrasil_mul (
     reg [66:0]                     multiplicand_x7_q;
     reg                            result_neg_q;
     reg [`DOUBLE_REGS_WIDTH-1:0]   result_q;
-
-    wire op_mulh   = operator_i[`OP_MUL_MULH];
-    wire op_mulhsu = operator_i[`OP_MUL_MULHSU];
-
-    wire operand_a_signed = op_mulh | op_mulhsu;
-    wire operand_b_signed = op_mulh;
-    wire operand_a_neg    = operand_a_signed & operand_a_i[`REGS_DATA_WIDTH-1];
-    wire operand_b_neg    = operand_b_signed & operand_b_i[`REGS_DATA_WIDTH-1];
-
-    wire [`REGS_DATA_WIDTH-1:0] operand_a_abs =
-        operand_a_neg ? (~operand_a_i + `REGS_DATA_WIDTH'd1) : operand_a_i;
-    wire [`REGS_DATA_WIDTH-1:0] operand_b_abs =
-        operand_b_neg ? (~operand_b_i + `REGS_DATA_WIDTH'd1) : operand_b_i;
 
     wire [34:0] operand_a_abs_ext = {3'b000, operand_a_abs};
     wire [34:0] operand_a_x0 = 35'b0;
@@ -176,6 +180,120 @@ module ydrasil_mul (
             end
         end
     end
+
+`else
+
+    localparam [1:0] MUL_4CYCLE_LAST = 2'd3;
+
+    reg                            busy_q;
+    reg                            done_q;
+    reg [1:0]                      iter_q;
+    reg [15:0]                     operand_a_lo_q;
+    reg signed [16:0]              operand_a_hi_q;
+    reg [15:0]                     operand_b_lo_q;
+    reg signed [16:0]              operand_b_hi_q;
+    reg [`DOUBLE_REGS_WIDTH-1:0]   acc_q;
+    reg [`DOUBLE_REGS_WIDTH-1:0]   result_q;
+
+    wire signed [16:0] operand_a_lo_half = $signed({1'b0, operand_a_i[15:0]});
+    wire signed [16:0] operand_b_lo_half = $signed({1'b0, operand_b_i[15:0]});
+    wire signed [16:0] operand_a_hi_half =
+        operand_a_signed ? $signed({operand_a_i[31], operand_a_i[31:16]}) :
+                           $signed({1'b0, operand_a_i[31:16]});
+    wire signed [16:0] operand_b_hi_half =
+        operand_b_signed ? $signed({operand_b_i[31], operand_b_i[31:16]}) :
+                           $signed({1'b0, operand_b_i[31:16]});
+
+    reg signed [16:0]              mul_lhs;
+    reg signed [16:0]              mul_rhs;
+    reg [1:0]                      partial_shift;
+    reg [`DOUBLE_REGS_WIDTH-1:0]   partial;
+
+    always @(*) begin
+        if (!busy_q) begin
+            mul_lhs       = operand_a_lo_half;
+            mul_rhs       = operand_b_lo_half;
+            partial_shift = 2'd0;
+        end else begin
+            case (iter_q)
+                2'd1: begin
+                    mul_lhs       = $signed({1'b0, operand_a_lo_q});
+                    mul_rhs       = operand_b_hi_q;
+                    partial_shift = 2'd1;
+                end
+                2'd2: begin
+                    mul_lhs       = operand_a_hi_q;
+                    mul_rhs       = $signed({1'b0, operand_b_lo_q});
+                    partial_shift = 2'd1;
+                end
+                default: begin
+                    mul_lhs       = operand_a_hi_q;
+                    mul_rhs       = operand_b_hi_q;
+                    partial_shift = 2'd2;
+                end
+            endcase
+        end
+    end
+
+    wire signed [33:0] mul_product = mul_lhs * mul_rhs;
+
+    always @(*) begin
+        case (partial_shift)
+            2'd0: partial = {{30{mul_product[33]}}, mul_product};
+            2'd1: partial = {{14{mul_product[33]}}, mul_product, 16'b0};
+            default: partial = {mul_product[31:0], 32'b0};
+        endcase
+    end
+
+    wire [`DOUBLE_REGS_WIDTH-1:0] acc_next = acc_q + partial;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            busy_q         <= 1'b0;
+            done_q         <= 1'b0;
+            iter_q         <= '0;
+            operand_a_lo_q <= '0;
+            operand_a_hi_q <= '0;
+            operand_b_lo_q <= '0;
+            operand_b_hi_q <= '0;
+            acc_q          <= '0;
+            result_q       <= '0;
+        end else if (flush_i) begin
+            busy_q         <= 1'b0;
+            done_q         <= 1'b0;
+            iter_q         <= '0;
+            operand_a_lo_q <= '0;
+            operand_a_hi_q <= '0;
+            operand_b_lo_q <= '0;
+            operand_b_hi_q <= '0;
+            acc_q          <= '0;
+            result_q       <= '0;
+        end else begin
+            done_q <= 1'b0;
+
+            if (start_i && !busy_q) begin
+                busy_q         <= 1'b1;
+                iter_q         <= 2'd1;
+                operand_a_lo_q <= operand_a_i[15:0];
+                operand_a_hi_q <= operand_a_hi_half;
+                operand_b_lo_q <= operand_b_i[15:0];
+                operand_b_hi_q <= operand_b_hi_half;
+                acc_q          <= partial;
+            end else if (busy_q) begin
+                acc_q <= acc_next;
+
+                if (iter_q == MUL_4CYCLE_LAST) begin
+                    busy_q   <= 1'b0;
+                    done_q   <= 1'b1;
+                    result_q <= acc_next;
+                end else begin
+                    iter_q <= iter_q + 2'd1;
+                end
+            end
+        end
+    end
+
+`endif
 
     assign busy_o   = busy_q;
     assign done_o   = done_q;
