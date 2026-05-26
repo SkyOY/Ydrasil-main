@@ -1,5 +1,6 @@
 `include "define_decode.svh"
 `include "define_mem_reg.svh"
+`include "define_rv32i_ins.svh"
 module ydrasil_id_stage #(
     parameter int DATA_WIDTH = 32
 )(
@@ -11,6 +12,7 @@ module ydrasil_id_stage #(
     // IF/ID input  
     input  wire [DATA_WIDTH-1:0]           if_id_pc_i,
     input  wire [DATA_WIDTH-1:0]           if_id_instr_i,
+    input  wire                            if_id_valid_i,
 
     // Register file read ports 
     output wire [4:0]                      rf_addr_rs1_o,
@@ -46,7 +48,10 @@ module ydrasil_id_stage #(
 	output wire [`CSR_ADDR_WIDTH-1:0] 	    id_csr_raddr_o,  
     output wire [`CSR_ADDR_WIDTH-1:0] 	    id_ex_csr_waddr_o,  
 	output wire [`OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info_o,
-	output wire [`OP_SYS_INFO_WIDTH-1:0]    id_op_sys_info_o,
+    output wire [`OP_SYS_INFO_WIDTH-1:0]    id_op_sys_info_o,
+    output wire                            id_ex_valid_o,
+    output wire                            id_ex_illegal_instr_o,
+    output wire [DATA_WIDTH-1:0]           id_ex_instr_o,
 
     output wire [DATA_WIDTH-1:0]           id_instr_addr_o, // 当前指令地址，供CLINT使用
     // Generic writeback information
@@ -126,6 +131,11 @@ module ydrasil_id_stage #(
     wire [`OP_SYS_INFO_WIDTH-1:0]  sys_op_info;
     reg [`OP_SYS_INFO_WIDTH-1:0]   sys_op_info_ff;
     wire                            operand_b_jump_sel;
+    reg                             id_ex_valid_ff;
+    wire                            illegal_instr;
+    reg                             illegal_instr_ff;
+    wire [DATA_WIDTH-1:0]           decoded_instr;
+    reg [DATA_WIDTH-1:0]            decoded_instr_ff;
 
 
     ydrasil_ins_decoder #(
@@ -149,6 +159,8 @@ module ydrasil_id_stage #(
         .csr_ex_waddr_o     (csr_ex_waddr),
         .csr_op_info_o      (csr_op_info),
         .sys_op_info_o      (sys_op_info),
+        .illegal_instr_o    (illegal_instr),
+        .instr_o            (decoded_instr),
         .operator_o         (operator),
         .operator_lsu_o     (operator_lsu),
         .operator_type_o    (operator_type)
@@ -206,6 +218,9 @@ module ydrasil_id_stage #(
             csr_ex_waddr_ff <= '0;
             csr_op_info_ff <= '0;
             sys_op_info_ff <= '0;
+            id_ex_valid_ff <= 1'b0;
+            illegal_instr_ff <= 1'b0;
+            decoded_instr_ff <= '0;
             id_instr_addr_ff <= '0;
             sel_rs_ff <= '0;
             rf_raddr_rs1_ff <= '0;
@@ -232,35 +247,41 @@ module ydrasil_id_stage #(
             csr_ex_waddr_ff <= '0;
             csr_op_info_ff <= '0;
             sys_op_info_ff <= '0;
+            id_ex_valid_ff <= 1'b0;
+            illegal_instr_ff <= 1'b0;
+            decoded_instr_ff <= '0;
             id_instr_addr_ff <= '0;
             sel_rs_ff <= '0;
             rf_raddr_rs1_ff <= '0;
             rf_raddr_rs2_ff <= '0;
         end
         else if (!stall_id_i) begin
-            operand_a_ff        <= operand_a;
-            operand_b_ff        <= operand_b;
-            operator_ff         <= operator;
-            operator_type_ff    <= operator_type;
-            rf_wen_rd_ff        <= rf_wen_rd;
-            rf_waddr_rd_ff      <= rf_waddr_rd;
-            operator_lsu_ff     <= operator_lsu;
-            id_lsu_rs2_data_ff  <= rf_rdata_rs2_i; // 直接传递寄存器数据，供LSU使用
-            bt_a_operand_ff     <= bt_a_operand;
-            bt_b_operand_ff     <= bt_b_operand;
-            id_ex_rs2_rd_forward_ff <= id_ex_rs2_rd_forward;
-            id_ex_rs1_rd_forward_ff <= id_ex_rs1_rd_forward;
-            id_lsu_rs2_rd_forward_ff <= id_lsu_rs2_rd_forward;
-            id_ex_bt_rs1_rd_forward_ff <= id_ex_bt_rs1_rd_forward;
-            csr_reg_raddr_ff <= csr_reg_raddr;
+            operand_a_ff        <= if_id_valid_i ? operand_a : '0;
+            operand_b_ff        <= if_id_valid_i ? operand_b : '0;
+            operator_ff         <= if_id_valid_i ? operator : '0;
+            operator_type_ff    <= if_id_valid_i ? operator_type : '0;
+            rf_wen_rd_ff        <= if_id_valid_i & rf_wen_rd;
+            rf_waddr_rd_ff      <= if_id_valid_i ? rf_waddr_rd : '0;
+            operator_lsu_ff     <= if_id_valid_i ? operator_lsu : '0;
+            id_lsu_rs2_data_ff  <= if_id_valid_i ? rf_rdata_rs2_i : '0; // 直接传递寄存器数据，供LSU使用
+            bt_a_operand_ff     <= if_id_valid_i ? bt_a_operand : '0;
+            bt_b_operand_ff     <= if_id_valid_i ? bt_b_operand : '0;
+            id_ex_rs2_rd_forward_ff <= if_id_valid_i & id_ex_rs2_rd_forward;
+            id_ex_rs1_rd_forward_ff <= if_id_valid_i & id_ex_rs1_rd_forward;
+            id_lsu_rs2_rd_forward_ff <= if_id_valid_i & id_lsu_rs2_rd_forward;
+            id_ex_bt_rs1_rd_forward_ff <= if_id_valid_i & id_ex_bt_rs1_rd_forward;
+            csr_reg_raddr_ff <= if_id_valid_i ? csr_reg_raddr : '0;
             // csr_ex_we_ff <= csr_ex_we;
-            csr_ex_waddr_ff <= csr_ex_waddr;
-            csr_op_info_ff <= csr_op_info;
-            sys_op_info_ff <= sys_op_info;
-            id_instr_addr_ff <= if_id_pc_i;
-            sel_rs_ff <= sel_rs;
-            rf_raddr_rs1_ff <= rf_raddr_rs1;
-            rf_raddr_rs2_ff <= rf_raddr_rs2;
+            csr_ex_waddr_ff <= if_id_valid_i ? csr_ex_waddr : '0;
+            csr_op_info_ff <= if_id_valid_i ? csr_op_info : '0;
+            sys_op_info_ff <= if_id_valid_i ? sys_op_info : '0;
+            id_ex_valid_ff <= if_id_valid_i;
+            illegal_instr_ff <= if_id_valid_i & illegal_instr;
+            decoded_instr_ff <= if_id_valid_i ? decoded_instr : `RV32I_INS_NOP;
+            id_instr_addr_ff <= if_id_valid_i ? if_id_pc_i : '0;
+            sel_rs_ff <= if_id_valid_i ? sel_rs : '0;
+            rf_raddr_rs1_ff <= if_id_valid_i ? rf_raddr_rs1 : '0;
+            rf_raddr_rs2_ff <= if_id_valid_i ? rf_raddr_rs2 : '0;
         end
     end
 
@@ -284,6 +305,9 @@ module ydrasil_id_stage #(
     assign  id_ex_csr_waddr_o = csr_ex_waddr_ff;
     assign  id_op_csr_info_o = csr_op_info_ff;
     assign  id_op_sys_info_o = sys_op_info_ff;
+    assign id_ex_valid_o = id_ex_valid_ff;
+    assign id_ex_illegal_instr_o = illegal_instr_ff;
+    assign id_ex_instr_o = decoded_instr_ff;
     assign id_instr_addr_o = id_instr_addr_ff;
     assign sel_rs_o = sel_rs_ff;
     assign id_ex_rs1_raddr_o = rf_raddr_rs1_ff;

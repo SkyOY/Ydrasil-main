@@ -25,6 +25,7 @@ module ydrasil_core #(
 	// IF/ID pipeline
 	wire [31:0] if_id_pc;
 	wire [31:0] if_id_instr;
+	wire        if_id_valid;
 
 	// CTRL signals
 	wire                        stall_if;
@@ -132,6 +133,13 @@ module ydrasil_core #(
     wire [`BUS_ADDR_WIDTH-1:0] id_instr_addr;
 
     wire [`OP_SYS_INFO_WIDTH-1:0] id_op_sys_info;
+    wire                          id_ex_valid;
+    wire                          id_ex_illegal_instr;
+    wire [31:0]                   id_ex_instr;
+    wire                          ex_trap_valid;
+    wire [31:0]                   ex_trap_cause;
+    wire [31:0]                   ex_trap_epc;
+    wire [31:0]                   ex_trap_tval;
 
     reg dram_addr_sel_ff; 
     reg lsu_mem_read_ff;
@@ -197,7 +205,8 @@ module ydrasil_core #(
 		.if_mem_addr_o   (if_mem_addr),
 		.if_mem_rdata_i  (if_mem_rdata),
 		.if_id_pc_o      (if_id_pc),
-		.if_id_instr_o   (if_id_instr)
+		.if_id_instr_o   (if_id_instr),
+        .if_id_valid_o   (if_id_valid)
 	);
 
 	ydrasil_id_stage u_ydrasil_id_stage (
@@ -207,6 +216,7 @@ module ydrasil_core #(
 		.flush_id_i         (flush_id),
 		.if_id_pc_i         (if_id_pc),
 		.if_id_instr_i      (if_id_instr),
+        .if_id_valid_i      (if_id_valid),
 		.rf_addr_rs1_o      (rf_raddr_rs1),
 		.rf_addr_rs2_o      (rf_raddr_rs2),
 		.rf_rdata_rs1_i     (rf_rdata_rs1),
@@ -230,8 +240,11 @@ module ydrasil_core #(
 		.id_ctrl_rs2_addr_o (id_ctrl_rs2_addr),
 		.id_csr_raddr_o     (id_csr_raddr),
 		.id_ex_csr_waddr_o  (id_ex_csr_waddr),
-		.id_op_csr_info_o   (id_op_csr_info),
+        .id_op_csr_info_o   (id_op_csr_info),
         .id_op_sys_info_o   (id_op_sys_info),
+        .id_ex_valid_o      (id_ex_valid),
+        .id_ex_illegal_instr_o(id_ex_illegal_instr),
+        .id_ex_instr_o      (id_ex_instr),
         .id_instr_addr_o     (id_instr_addr),
 		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
 		.id_rf_waddr_rd_o   (id_rf_waddr_rd)
@@ -261,11 +274,15 @@ module ydrasil_core #(
         .ex_csr_wdata_o(ex_csr_wdata),
         .ex_csr_waddr_o(ex_csr_waddr),
 		.sel_rs_i(sel_rs),
+        .id_ex_valid_i(id_ex_valid),
 		.wb_ex_pending_wdata_rd_ff_i(wb_ex_pending_wdata_rd_ff),
 		.wb_ex_pending_waddr_rd_ff_i(wb_ex_pending_waddr_rd_ff),
 		.wb_ex_pending_ff_i(wb_ex_pending_ff),
 		.id_ex_rs2_raddr_i(id_ex_rs2_raddr),
 		.id_ex_rs1_raddr_i(id_ex_rs1_raddr),
+        .id_ex_illegal_instr_i(id_ex_illegal_instr),
+        .id_ex_instr_i      (id_ex_instr),
+        .id_instr_addr_i    (id_instr_addr),
 		.ex_branch_jump_o   (ex_branch_jump),
 		.ex_branch_target_o (ex_branch_target),
 			.ex_lsu_mem_addr_o  (ex_lsu_mem_addr),
@@ -273,7 +290,11 @@ module ydrasil_core #(
 			.alu_result_o       (alu_result),
 			.alu_rf_wen_rd_o    (alu_rf_wen_rd),
 			.alu_rf_waddr_rd_o  (alu_rf_waddr_rd),
-	        .ex_mul_stall_o     (ex_mul_stall)
+	        .ex_mul_stall_o     (ex_mul_stall),
+            .ex_trap_valid_o    (ex_trap_valid),
+            .ex_trap_cause_o    (ex_trap_cause),
+            .ex_trap_epc_o      (ex_trap_epc),
+            .ex_trap_tval_o     (ex_trap_tval)
 		);
 
 	ydrasil_mems u_ydrasil_mems (
@@ -369,7 +390,11 @@ module ydrasil_core #(
 		.ex_branch_jump_i       (ex_branch_jump),
 		.ex_branch_target_i       (ex_branch_target),
         .sys_op_info_i      (id_op_sys_info),
-        .sys_op_i           (operator_type[`OPERATOR_TYPE_SYS]), // 只要有任意
+        .sys_op_i           (id_ex_valid & operator_type[`OPERATOR_TYPE_SYS]),
+        .trap_valid_i       (ex_trap_valid),
+        .trap_cause_i       (ex_trap_cause),
+        .trap_epc_i         (ex_trap_epc),
+        .trap_tval_i        (ex_trap_tval),
 		.csr_clint_data_i  (csr_clint_data),
 		.csr_clint_mtvec   (csr_clint_mtvec),
 		.csr_clint_mepc    (csr_clint_mepc),

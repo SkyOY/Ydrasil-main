@@ -28,6 +28,10 @@ module ydrasil_ex_block #(
  	input wire [`REGS_ADDR_WIDTH-1:0]		wb_ex_pending_waddr_rd_ff_i,
  	input wire                       		wb_ex_pending_ff_i,
 	input wire [`OPSEL_INFO_WIDTH-1:0]		sel_rs_i,
+	input  wire                            id_ex_valid_i,
+	input  wire                            id_ex_illegal_instr_i,
+	input  wire [DATA_WIDTH-1:0]           id_ex_instr_i,
+	input  wire [DATA_WIDTH-1:0]           id_instr_addr_i,
 
 	input  wire [`CSR_ADDR_WIDTH-1:0] 	   id_ex_csr_waddr_i,
 	input  wire [`OP_CSR_INFO_WIDTH-1:0]   id_op_csr_info_i,
@@ -46,7 +50,11 @@ module ydrasil_ex_block #(
 	    output wire [`REGS_DATA_WIDTH-1:0]     alu_result_o,
 	    output wire                            alu_rf_wen_rd_o,
 	    output wire [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_o,
-		output wire                            ex_mul_stall_o
+		output wire                            ex_mul_stall_o,
+		output wire                            ex_trap_valid_o,
+		output wire [DATA_WIDTH-1:0]           ex_trap_cause_o,
+		output wire [DATA_WIDTH-1:0]           ex_trap_epc_o,
+		output wire [DATA_WIDTH-1:0]           ex_trap_tval_o
 	);
 
 	// 分支目标地址：EX 内部单独加法器计算 PC + imm_b
@@ -105,7 +113,13 @@ module ydrasil_ex_block #(
 
     assign bt_alu_result = bt_a_operand + bt_b_operand;
 	assign ex_lsu_mem_addr_o = alu_result;
-    assign ex_branch_target_o = interrupt_i ? clint_ex_int_addr_i:bt_alu_result;
+	wire [31:0] branch_target;
+	wire        branch_target_misaligned;
+	wire        ex_local_trap;
+	assign branch_target = bt_a_sel_rs1 ? {bt_alu_result[31:1], 1'b0} : bt_alu_result;
+	assign branch_target_misaligned = ex_branch_jump & branch_target[1];
+	assign ex_local_trap = id_ex_valid_i & (id_ex_illegal_instr_i | branch_target_misaligned);
+    assign ex_branch_target_o = interrupt_i ? clint_ex_int_addr_i : branch_target;
 
 	// 内部例化 ALU，EX 直接透传控制和操作数
 
@@ -114,22 +128,22 @@ module ydrasil_ex_block #(
 
 	assign ex_lsu_result_o = alu_result_ff ;
 
-	assign ex_branch_jump_o = ex_branch_jump | interrupt_i;
-	assign op_m_unit = operator_type_i[`OPERATOR_TYPE_MUL];
+	assign ex_branch_jump_o = (id_ex_valid_i & ex_branch_jump & !branch_target_misaligned & !id_ex_illegal_instr_i) | interrupt_i;
+	assign op_m_unit = id_ex_valid_i & operator_type_i[`OPERATOR_TYPE_MUL];
 	assign op_mul = op_m_unit &
 					(operator_i[`OP_MUL_MUL] | operator_i[`OP_MUL_MULH] |
 					 operator_i[`OP_MUL_MULHSU] | operator_i[`OP_MUL_MULHU]);
 	assign op_div = op_m_unit &
 					(operator_i[`OP_MUL_DIV] | operator_i[`OP_MUL_DIVU] |
 					 operator_i[`OP_MUL_REM] | operator_i[`OP_MUL_REMU]);
-	assign mul_start = op_mul & !mul_busy & !mul_done & !interrupt_i;
-	assign div_start = op_div & !div_busy & !div_done & !interrupt_i;
+	assign mul_start = op_mul & !mul_busy & !mul_done & !interrupt_i & !ex_local_trap;
+	assign div_start = op_div & !div_busy & !div_done & !interrupt_i & !ex_local_trap;
 	assign m_done = (op_mul & mul_done) | (op_div & div_done);
 	assign ex_mul_stall_o = op_m_unit & !m_done;
 	assign mul_wb_result = operator_i[`OP_MUL_MUL] ? mul_result[31:0] : mul_result[63:32];
 	assign m_wb_result = op_div ? div_result : mul_wb_result;
-	assign m_rf_wen_rd = m_done & id_alu_rf_wen_rd_i & !interrupt_i;
-	assign normal_alu_rf_wen_rd = alu_rf_wen_rd & !op_m_unit;
+	assign m_rf_wen_rd = m_done & id_alu_rf_wen_rd_i & !interrupt_i & !ex_local_trap;
+	assign normal_alu_rf_wen_rd = alu_rf_wen_rd & !op_m_unit & !ex_local_trap;
 
 	ydrasil_alu #(
 		.DATAWIDTH(DATA_WIDTH)
@@ -185,7 +199,7 @@ module ydrasil_ex_block #(
 
 	//csr
 
-		wire op_csr = operator_type_i[`OPERATOR_TYPE_CSR] ;
+		wire op_csr = id_ex_valid_i & operator_type_i[`OPERATOR_TYPE_CSR] ;
 
 		wire csr_csrrw = op_csr & id_op_csr_info_i[`OP_CSR_CSRRW];
 		wire csr_csrrs = op_csr & id_op_csr_info_i[`OP_CSR_CSRRS];
@@ -193,6 +207,9 @@ module ydrasil_ex_block #(
 
 		wire [31:0]csr_reg_wdata ;
 		wire [31:0]csr_wdata ;
+		wire csr_source_zero;
+		wire csr_write_side_effect;
+		wire csr_rf_wen;
 
 	reg [`REGS_DATA_WIDTH-1:0] ex_csr_wdata_o_ff;
 	reg 						ex_csr_wen_o_ff;
@@ -204,8 +221,11 @@ module ydrasil_ex_block #(
 							({`REGS_DATA_WIDTH{csr_csrrw}} & operand_a) |
                           	({`REGS_DATA_WIDTH{csr_csrrs}} & (operand_a | csr_ex_rdata_i)) |
                           	({`REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a)));
-	assign csr_wen = op_csr;
-	assign ex_rf_wen_rd = m_rf_wen_rd | normal_alu_rf_wen_rd | csr_wen;
+	assign csr_source_zero = op_a_sel_rs1 ? (id_ex_rs1_raddr_i == '0) : (operand_a[4:0] == 5'b0);
+	assign csr_write_side_effect = csr_csrrw | ((csr_csrrs | csr_csrrc) & !csr_source_zero);
+	assign csr_wen = op_csr & csr_write_side_effect & !ex_local_trap & !interrupt_i;
+	assign csr_rf_wen = op_csr & id_alu_rf_wen_rd_i & !ex_local_trap & !interrupt_i;
+	assign ex_rf_wen_rd = m_rf_wen_rd | normal_alu_rf_wen_rd | csr_rf_wen;
 	
 	always_ff @(posedge clk or negedge rst_n) begin
 		if(!rst_n) begin
@@ -238,8 +258,14 @@ module ydrasil_ex_block #(
 	assign ex_csr_wen_o = ex_csr_wen_o_ff;
 	assign ex_csr_waddr_o = ex_csr_waddr_o_ff;
 	assign alu_csr_result = ({32{m_rf_wen_rd}} & m_wb_result) |
-							({32{csr_wen}} & csr_reg_wdata )|
+							({32{csr_rf_wen}} & csr_reg_wdata )|
 							({32{normal_alu_rf_wen_rd} }& alu_result) ;
+
+	assign ex_trap_valid_o = ex_local_trap;
+	assign ex_trap_cause_o = id_ex_illegal_instr_i ? `TRAP_CAUSE_ILLEGAL_INSN :
+	                         `TRAP_CAUSE_MISALIGNED_FETCH;
+	assign ex_trap_epc_o   = id_instr_addr_i;
+	assign ex_trap_tval_o  = id_ex_illegal_instr_i ? id_ex_instr_i : branch_target;
 
 
 

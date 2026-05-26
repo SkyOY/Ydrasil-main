@@ -24,9 +24,11 @@ module ydrasil_ins_decoder #(
 
 	output wire [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_o,  // 读CSR寄存器地址
     // output wire                        	 csr_ex_we_o,        // 写CSR寄存器标志
-    output wire [`CSR_ADDR_WIDTH-1:0] 	 csr_ex_waddr_o,      // 写CSR寄存器地址
+	output wire [`CSR_ADDR_WIDTH-1:0] 	 csr_ex_waddr_o,      // 写CSR寄存器地址
 	output wire [`OP_CSR_INFO_WIDTH-1:0] csr_op_info_o,
 	output wire [`OP_SYS_INFO_WIDTH-1:0] sys_op_info_o,
+	output wire       illegal_instr_o,
+	output wire [DATA_WIDTH-1:0] instr_o,
 
 
 	output wire [`OPERATOR_WIDTH-1:0] operator_o,
@@ -93,6 +95,7 @@ module ydrasil_ins_decoder #(
 	wire is_jalr     ;
 	wire is_lui      ;
 	wire is_auipc    ;
+	wire is_system_opcode;
 	wire is_csr	  ;
 	wire is_sys		;
 
@@ -105,7 +108,8 @@ module ydrasil_ins_decoder #(
 	assign is_jalr     = (opcode == `RV32I_INS_JALR) & funct3_is_000;
 	assign is_lui      = (opcode == `RV32I_INS_LUI);
 	assign is_auipc    = (opcode == `RV32I_INS_AUIPC);
-	assign is_csr      = (opcode == `RV32I_INS_CSR);
+	assign is_system_opcode = (opcode == `RV32I_INS_CSR);
+	assign is_csr      = is_system_opcode & (funct3 != 3'b000);
 
 	wire is_beq      ;
 	wire is_bne      ;
@@ -206,6 +210,11 @@ module ydrasil_ins_decoder #(
 	                    is_xor | is_srl | is_sra | is_or | is_and;
 	wire is_mul_use = is_mul | is_mulh | is_mulhsu | is_mulhu |
 	                  is_div | is_divu | is_rem | is_remu;
+	wire is_i_alu_use = is_addi | is_slti | is_sltiu | is_xori | is_ori |
+	                    is_andi | is_shift;
+	wire is_load_use = is_lb | is_lh | is_lw | is_lbu | is_lhu;
+	wire is_store_use = is_sb | is_sh | is_sw;
+	wire is_branch_use = is_beq | is_bne | is_blt | is_bge | is_bltu | is_bgeu;
 
 	wire is_fence  ;
 	wire is_fence_i;
@@ -238,6 +247,7 @@ module ydrasil_ins_decoder #(
 	assign is_csrrwi = is_csr  	& (funct3 == `RV32I_INS_CSRRWI);
 	assign is_csrrsi = is_csr  	& (funct3 == `RV32I_INS_CSRRSI);
 	assign is_csrrci = is_csr  	& (funct3 == `RV32I_INS_CSRRCI);
+	wire is_csr_use = is_csrrw | is_csrrs | is_csrrc | is_csrrwi | is_csrrsi | is_csrrci;
 
 
 	assign alu_op_info[`OP_ALU_ADD]   = is_addi | is_add ;
@@ -293,17 +303,22 @@ module ydrasil_ins_decoder #(
        					(~is_nop) 	& (~is_fence_i);// U类型指令不需要rs1
 	wire rf_ren_rs2 = is_r_alu_use | is_mul_use | is_branch ; // R类型和分支指令需要rs2
 
-	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_r_alu_use | is_mul_use ; // 需要写回寄存器的指令类型 
+	wire instr_valid = is_i_alu_use | is_r_alu_use | is_mul_use |
+	                   is_load_use | is_store_use | is_branch_use |
+	                   is_jal | is_jalr | is_lui | is_auipc |
+	                   is_csr_use | is_sys | is_fence | is_fence_i;
 
-	wire is_alu_use = is_op_imm | is_r_alu_use | is_lui | is_auipc;
-	wire is_bjp_use = is_branch | is_jal | is_jalr;
+	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_i_alu_use | is_r_alu_use | is_mul_use | is_csr_use ; // 需要写回寄存器的指令类型 
+
+	wire is_alu_use = is_i_alu_use | is_r_alu_use | is_lui | is_auipc;
+	wire is_bjp_use = is_branch_use | is_jal | is_jalr;
 
 
 	assign operator_type_o [`OPERATOR_TYPE_ALU] = is_alu_use;
 	assign operator_type_o [`OPERATOR_TYPE_BJP] = is_bjp_use;
-	assign operator_type_o [`OPERATOR_TYPE_LOAD] = is_load;
-	assign operator_type_o [`OPERATOR_TYPE_STORE] = is_store;
-	assign operator_type_o [`OPERATOR_TYPE_CSR] = is_csr;
+	assign operator_type_o [`OPERATOR_TYPE_LOAD] = is_load_use;
+	assign operator_type_o [`OPERATOR_TYPE_STORE] = is_store_use;
+	assign operator_type_o [`OPERATOR_TYPE_CSR] = is_csr_use;
 	assign operator_type_o [`OPERATOR_TYPE_SYS] = is_sys;
 	assign operator_type_o [`OPERATOR_TYPE_MUL] = is_mul_use;
 	// wire [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
@@ -317,13 +332,13 @@ module ydrasil_ins_decoder #(
 	wire [31:0] imm_shamt_mask ;
 	wire [31:0] imm_csr_mask	;
 
-	assign imm_i_mask 	= ((is_op_imm & ! is_shift) | is_jalr | is_load) ? imm_i : '0;
-	assign imm_s_mask 	= is_store ? imm_s : '0;
-	assign imm_b_mask 	= is_branch ? imm_b : '0;
+	assign imm_i_mask 	= (((is_i_alu_use & !is_shift)) | is_jalr | is_load_use) ? imm_i : '0;
+	assign imm_s_mask 	= is_store_use ? imm_s : '0;
+	assign imm_b_mask 	= is_branch_use ? imm_b : '0;
 	assign imm_u_mask 	= (is_lui | is_auipc) ? imm_u : '0;
 	assign imm_j_mask 	= is_jal ? imm_j : '0;
 	assign imm_shamt_mask = is_shift ? imm_shamt : '0;
-	assign imm_csr_mask = is_csr ? imm_csr : '0;
+	assign imm_csr_mask = is_csr_use ? imm_csr : '0;
 
 	assign imm_i_o = imm_i_mask | imm_s_mask | imm_b_mask | imm_u_mask | imm_j_mask | imm_shamt_mask | imm_csr_mask;
 
@@ -339,7 +354,7 @@ module ydrasil_ins_decoder #(
 
 	assign operand_a_imm_sel = is_csrrwi | is_csrrsi | is_csrrci;
 
-	assign operand_b_rs_sel = is_branch | is_r_alu_use | is_mul_use;
+	assign operand_b_rs_sel = is_branch_use | is_r_alu_use | is_mul_use;
 	assign operand_a_pc_sel = is_auipc  |is_jal |is_jalr;
 	assign bt_a_rs_sel = is_jalr;
 
@@ -361,5 +376,7 @@ module ydrasil_ins_decoder #(
 	assign csr_ex_waddr_o = instr_i[31:20];
 	assign csr_op_info_o = csr_op_info;
 	assign sys_op_info_o = sys_op_info;
+	assign illegal_instr_o = ~instr_valid;
+	assign instr_o = instr_i;
 
 endmodule

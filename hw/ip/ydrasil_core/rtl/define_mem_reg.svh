@@ -40,13 +40,41 @@
 
 // CSR reg addr
 `define CSR_CYCLE 12'hc00
+`define CSR_TIME 12'hc01
+`define CSR_INSTRET 12'hc02
 `define CSR_CYCLEH 12'hc80
+`define CSR_TIMEH 12'hc81
+`define CSR_INSTRETH 12'hc82
+`define CSR_MVENDORID 12'hf11
+`define CSR_MARCHID 12'hf12
+`define CSR_MIMPID 12'hf13
+`define CSR_MHARTID 12'hf14
 `define CSR_MTVEC 12'h305
+`define CSR_MISA 12'h301
+`define CSR_MEDELEG 12'h302
+`define CSR_MIDELEG 12'h303
 `define CSR_MCAUSE 12'h342
 `define CSR_MEPC 12'h341
+`define CSR_MTVAL 12'h343
+`define CSR_MIP 12'h344
 `define CSR_MIE 12'h304
 `define CSR_MSTATUS 12'h300
+`define CSR_MSTATUSH 12'h310
+`define CSR_MCOUNTEREN 12'h306
+`define CSR_MCOUNTINHIBIT 12'h320
 `define CSR_MSCRATCH 12'h340
+`define CSR_MCYCLE 12'hb00
+`define CSR_MINSTRET 12'hb02
+`define CSR_MCYCLEH 12'hb80
+`define CSR_MINSTRETH 12'hb82
+`define CSR_PMPCFG0 12'h3a0
+`define CSR_PMPADDR0 12'h3b0
+`define CSR_SATP 12'h180
+
+`define TRAP_CAUSE_MISALIGNED_FETCH 32'd0
+`define TRAP_CAUSE_ILLEGAL_INSN 32'd2
+`define TRAP_CAUSE_BREAKPOINT 32'd3
+`define TRAP_CAUSE_MACHINE_ECALL 32'd11
 
 
 // `endif

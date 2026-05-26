@@ -24,26 +24,26 @@
 
 `include "define_mem_reg.svh"
 `include "define_decode.svh"
-// core local interruptor module
+
 module ydrasil_clint (
 
     input wire clk,
     input wire rst_n,
 
-    // from id
+    // from id/ex
     input wire [`INST_ADDR_WIDTH-1:0] instr_addr_i,
 
-    // from ex
+    // kept for interface compatibility
     input wire                        ex_branch_jump_i,
     input wire [`INST_ADDR_WIDTH-1:0] ex_branch_target_i,
-    // input wire                        muldiv_started_i,
     
-    // 添加系统操作输入端口
     input wire [`OP_SYS_INFO_WIDTH-1:0] sys_op_info_i,
     input wire                          sys_op_i,
 
-    // from ctrl
-    // input wire                        stall_if_i,
+    input wire                          trap_valid_i,
+    input wire [`REGS_DATA_WIDTH-1:0]   trap_cause_i,
+    input wire [`INST_ADDR_WIDTH-1:0]   trap_epc_i,
+    input wire [`REGS_DATA_WIDTH-1:0]   trap_tval_i,
 
     // from csr_reg
     input wire [`REGS_DATA_WIDTH-1:0] csr_clint_data_i,
@@ -51,10 +51,10 @@ module ydrasil_clint (
     input wire [`REGS_DATA_WIDTH-1:0] csr_clint_mepc,
     input wire [`REGS_DATA_WIDTH-1:0] csr_clint_mstatus,
 
-    input wire global_int_en_i,  // 全局中断使能标志
+    input wire global_int_en_i,
 
     // to ctrl
-    output wire                     clint_stall_o,
+    output wire                       clint_stall_o,
 
     // to csr_reg
     output wire                       clint_csr_we_o,
@@ -63,163 +63,157 @@ module ydrasil_clint (
     output wire [`REGS_DATA_WIDTH-1:0] clint_csr_data_o,
 
     // to ex
-    output wire [`INST_ADDR_WIDTH-1:0] clint_ex_int_addr_o,   //ecall和ebreak的返回地址
-    output wire                        interrupt_o  //ecall和ebreak的中断信号
+    output wire [`INST_ADDR_WIDTH-1:0] clint_ex_int_addr_o,
+    output wire                        interrupt_o
 );
 
-    wire    sys_op_ecall_i;
-    wire    sys_op_ebreak_i;
-    wire    sys_op_mret_i;
+    localparam [2:0] S_IDLE        = 3'd0;
+    localparam [2:0] S_TRAP_MEPC   = 3'd1;
+    localparam [2:0] S_TRAP_STATUS = 3'd2;
+    localparam [2:0] S_TRAP_CAUSE  = 3'd3;
+    localparam [2:0] S_TRAP_TVAL   = 3'd4;
+    localparam [2:0] S_MRET_STATUS = 3'd5;
 
-    assign sys_op_ecall_i = sys_op_info_i[`OP_SYS_ECALL] & sys_op_i;
-    assign sys_op_ebreak_i = sys_op_info_i[`OP_SYS_EBREAK] & sys_op_i;
-    assign sys_op_mret_i = sys_op_info_i[`OP_SYS_MRET] & sys_op_i;
+    wire sys_op_ecall  = sys_op_info_i[`OP_SYS_ECALL] & sys_op_i;
+    wire sys_op_ebreak = sys_op_info_i[`OP_SYS_EBREAK] & sys_op_i;
+    wire sys_op_mret   = sys_op_info_i[`OP_SYS_MRET] & sys_op_i;
 
-    // interrupt state machine
-    localparam S_INT_IDLE = 4'b0001;  // 空闲状态
-    localparam S_INT_SYNC_ASSERT = 4'b0010;  // 同步中断断言状态
-    localparam S_INT_ASYNC_ASSERT = 4'b0100;  // 异步中断断言状态 
-    localparam S_INT_MRET = 4'b1000;  // 中断返回状态
+    wire sys_trap_req = sys_op_ecall | sys_op_ebreak;
+    wire trap_req = trap_valid_i | sys_trap_req;
 
-    // CSR write state machine
-    localparam S_CSR_IDLE = 5'b00001;  // CSR写入空闲状态
-    localparam S_CSR_MSTATUS = 5'b00010;  // 写入mstatus寄存器状态
-    localparam S_CSR_MEPC = 5'b00100;  // 写入mepc寄存器状态
-    localparam S_CSR_MSTATUS_MRET = 5'b01000;  // 中断返回时写入mstatus寄存器状态
-    localparam S_CSR_MCAUSE = 5'b10000;  // 写入mcause寄存器状态
+    reg [2:0] csr_state_q;
+    reg [`INST_ADDR_WIDTH-1:0] epc_q;
+    reg [`REGS_DATA_WIDTH-1:0] cause_q;
+    reg [`REGS_DATA_WIDTH-1:0] tval_q;
 
-    reg [`INST_ADDR_WIDTH-1:0] int_addr;
-    reg                         int_assert;
+    reg                        we_q;
+    reg [`CSR_ADDR_WIDTH-1:0]  waddr_q;
+    reg [`CSR_ADDR_WIDTH-1:0]  raddr_q;
+    reg [`REGS_DATA_WIDTH-1:0] data_q;
+    reg                        int_assert_q;
+    reg [`INST_ADDR_WIDTH-1:0] int_addr_q;
 
+    wire take_trap = (csr_state_q == S_IDLE) & trap_req;
+    wire take_mret = (csr_state_q == S_IDLE) & !trap_req & sys_op_mret;
 
-    // 状态机和相关信号声明
-    wire [                 3:0] int_state;  // 中断状态机当前状态
-    reg  [                 4:0] csr_state;  // CSR写状态机当前状态
-    reg  [`INST_ADDR_WIDTH-1:0] instr_addr;  // 保存的指令地址
-    reg  [                31:0] cause;  // 中断原因代码
+    wire [`REGS_DATA_WIDTH-1:0] requested_cause =
+        trap_valid_i ? trap_cause_i :
+        sys_op_ebreak ? `TRAP_CAUSE_BREAKPOINT :
+        `TRAP_CAUSE_MACHINE_ECALL;
+    wire [`INST_ADDR_WIDTH-1:0] requested_epc =
+        trap_valid_i ? trap_epc_i : instr_addr_i;
+    wire [`REGS_DATA_WIDTH-1:0] requested_tval =
+        trap_valid_i ? trap_tval_i : `REGS_DATA_WIDTH'b0;
 
-    // 下一个状态信号声明
-    wire [                 4:0] next_csr_state;  // CSR写状态机下一状态
-    wire [`INST_ADDR_WIDTH-1:0] next_instr_addr;  // 下一个保存的指令地址
-    wire [                31:0] next_cause;  // 下一个中断原因代码
+    function automatic [`REGS_DATA_WIDTH-1:0] trap_mstatus(
+        input [`REGS_DATA_WIDTH-1:0] mstatus_i
+    );
+        reg [`REGS_DATA_WIDTH-1:0] value;
+        begin
+            value = mstatus_i;
+            value[7] = mstatus_i[3];    // MPIE <= MIE
+            value[3] = 1'b0;            // MIE <= 0
+            value[12:11] = 2'b11;       // MPP <= M
+            trap_mstatus = value;
+        end
+    endfunction
 
-    // 暂停信号产生逻辑 - 当中断状态机或CSR写状态机不在空闲状态时暂停流水线
-    assign clint_stall_o = ((int_state != S_INT_IDLE) | (csr_state != S_CSR_IDLE)) ? 1'b1 : 1'b0;
+    function automatic [`REGS_DATA_WIDTH-1:0] mret_mstatus(
+        input [`REGS_DATA_WIDTH-1:0] mstatus_i
+    );
+        reg [`REGS_DATA_WIDTH-1:0] value;
+        begin
+            value = mstatus_i;
+            value[3] = mstatus_i[7];    // MIE <= MPIE
+            value[7] = 1'b1;            // MPIE <= 1
+            value[12:11] = 2'b11;       // no lower privilege modes implemented
+            mret_mstatus = value;
+        end
+    endfunction
 
-    // 中断处理逻辑
-    assign int_state = 
-        ({4{!rst_n}} & S_INT_IDLE) |
-        ({4{((sys_op_ecall_i || sys_op_ebreak_i) )}} & S_INT_SYNC_ASSERT) |
-        ({4{sys_op_mret_i}} & S_INT_MRET) |
-        ({4{!(!rst_n || ((sys_op_ecall_i || sys_op_ebreak_i) ) || sys_op_mret_i)}} & S_INT_IDLE);
+    assign clint_stall_o = (csr_state_q != S_IDLE) | trap_req | sys_op_mret;
 
-    // CSR写状态机的并行选择逻辑
-    assign next_csr_state = 
-        ({5{!rst_n}} & S_CSR_IDLE) |
-        ({5{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT}} & S_CSR_MEPC) |
-        ({5{csr_state == S_CSR_IDLE && int_state == S_INT_MRET}} & S_CSR_MSTATUS_MRET) |
-        ({5{csr_state == S_CSR_MEPC}} & S_CSR_MSTATUS) |
-        ({5{csr_state == S_CSR_MSTATUS}} & S_CSR_MCAUSE) |
-        ({5{csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MSTATUS_MRET}} & S_CSR_IDLE) |
-        ({5{!(!rst_n || 
-             (csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT) || 
-             (csr_state == S_CSR_IDLE && int_state == S_INT_MRET) || 
-             csr_state == S_CSR_MEPC || 
-             csr_state == S_CSR_MSTATUS || 
-             (csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MSTATUS_MRET))}} & S_CSR_IDLE);
-
-    // 下一个中断原因cause值的并行选择逻辑
-    assign next_cause = 
-        ({32{!rst_n}} & '0) |
-        ({32{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && sys_op_ecall_i}} & 32'd11) |
-        ({32{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && sys_op_ebreak_i}} & 32'd3) |
-        ({32{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && !sys_op_ecall_i && !sys_op_ebreak_i}} & 32'd10) |
-        ({32{!(!rst_n || (csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT))}} & cause);
-
-    // 下一个保存的指令地址instr_addr值的并行选择逻辑
-    assign next_instr_addr = 
-        ({`INST_ADDR_WIDTH{!rst_n}} & '0) |
-        ({`INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && ex_branch_jump_i}} & (ex_branch_target_i - 32'h4)) |
-        ({`INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && ex_branch_jump_i}} & instr_addr_i) |
-        ({`INST_ADDR_WIDTH{!(!rst_n || (csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT))}} & instr_addr);
-
-    // 写入CSR寄存器的组合逻辑 - 计算下一个写使能信号
-    wire                       next_we_o;  // 下一个写使能信号
-    wire [`CSR_ADDR_WIDTH-1:0] next_waddr_o;  // 下一个写地址
-    wire [`REGS_DATA_WIDTH-1:0] next_data_o;  // 下一个写数据
-
-    // 计算写使能信号 - 当需要写入任何CSR寄存器时置为WriteEnable
-    assign next_we_o = (!rst_n) ? 1'b0 :
-                      (csr_state == S_CSR_MEPC || csr_state == S_CSR_MCAUSE || 
-                       csr_state == S_CSR_MSTATUS || csr_state == S_CSR_MSTATUS_MRET) ? 1'b1 :
-                      1'b0;
-
-    // 计算写地址 - 基于当前状态选择要写入的CSR寄存器地址
-    assign next_waddr_o = (!rst_n) ? '0 :
-                         (csr_state == S_CSR_MEPC) ? { `CSR_MEPC} :            // 写入mepc寄存器
-        (csr_state == S_CSR_MCAUSE) ? {`CSR_MCAUSE} :  // 写入mcause寄存器
-        (csr_state == S_CSR_MSTATUS || csr_state == S_CSR_MSTATUS_MRET) ? {`CSR_MSTATUS} : // 写入mstatus寄存器
-        '0;
-
-    // 计算写数据 - 基于当前状态确定要写入CSR寄存器的数据
-    assign next_data_o = (!rst_n) ? '0 :
-                        (csr_state == S_CSR_MEPC) ? instr_addr :                     // 保存当前指令地址到mepc
-        (csr_state == S_CSR_MCAUSE) ? cause :  // 写入中断原因到mcause
-        (csr_state == S_CSR_MSTATUS) ? {csr_clint_mstatus[31:4], 1'b0, csr_clint_mstatus[2:0]} :      // 中断发生时修改mstatus，关闭全局中断
-        (csr_state == S_CSR_MSTATUS_MRET) ? {csr_clint_mstatus[31:4], csr_clint_mstatus[7], csr_clint_mstatus[2:0]} : // 中断返回时恢复mstatus
-        '0;
-
-    // 发送中断信号到ex模块的组合逻辑
-    wire                        next_int_assert_o;  // 下一个中断断言信号
-    wire [`INST_ADDR_WIDTH-1:0] next_int_addr_o;  // 下一个中断地址
-
-    // 计算中断断言信号 - 在完成CSR写入或中断返回时断言
-    assign next_int_assert_o = (!rst_n) ? 1'b0 :
-                              (csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MSTATUS_MRET) ? 1'b1 :
-                              1'b0;
-
-    // 计算中断地址 - 中断处理或中断返回的目标地址
-    assign next_int_addr_o = (!rst_n) ? '0 :
-                            (csr_state == S_CSR_MCAUSE) ? csr_clint_mtvec :      // 中断发生时跳转到mtvec
-        (csr_state == S_CSR_MSTATUS_MRET) ? csr_clint_mepc :  // 中断返回时跳转到mepc
-        '0;
-
-    reg                         we_o;
-    reg [`CSR_ADDR_WIDTH-1:0]   waddr_o;
-    reg [`CSR_ADDR_WIDTH-1:0]   raddr_o;
-    reg [`REGS_DATA_WIDTH-1:0]  data_o;
-
-    // 一级时序寄存器：仅寄存，不改assign组合逻辑
-    always @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            csr_state     <= S_CSR_IDLE;
-            cause         <= 32'h0;
-            instr_addr     <= {`INST_ADDR_WIDTH{1'b0}};
-            we_o          <= 1'b0;
-            waddr_o       <= {`CSR_ADDR_WIDTH{1'b0}};
-            data_o        <= {`REGS_DATA_WIDTH{1'b0}};
-            int_assert  <= 1'b0;
-            int_addr    <= {`INST_ADDR_WIDTH{1'b0}};
-            raddr_o       <= {`CSR_ADDR_WIDTH{1'b0}};
+            csr_state_q <= S_IDLE;
+            epc_q       <= '0;
+            cause_q     <= '0;
+            tval_q      <= '0;
+            we_q        <= 1'b0;
+            waddr_q     <= '0;
+            raddr_q     <= '0;
+            data_q      <= '0;
+            int_assert_q <= 1'b0;
+            int_addr_q  <= '0;
         end else begin
-            csr_state     <= next_csr_state;
-            cause         <= next_cause;
-            instr_addr     <= next_instr_addr;
-            we_o          <= next_we_o;
-            waddr_o       <= next_waddr_o;
-            data_o        <= next_data_o;
-            int_assert  <= next_int_assert_o;
-            int_addr    <= next_int_addr_o;
-            raddr_o       <= {`CSR_ADDR_WIDTH{1'b0}};
+            we_q         <= 1'b0;
+            waddr_q      <= '0;
+            raddr_q      <= '0;
+            data_q       <= '0;
+            int_assert_q <= 1'b0;
+            int_addr_q   <= '0;
+
+            if (take_trap) begin
+                epc_q       <= requested_epc;
+                cause_q     <= requested_cause;
+                tval_q      <= requested_tval;
+                csr_state_q <= S_TRAP_MEPC;
+            end else if (take_mret) begin
+                csr_state_q <= S_MRET_STATUS;
+            end else begin
+                case (csr_state_q)
+                    S_TRAP_MEPC: begin
+                        we_q        <= 1'b1;
+                        waddr_q     <= `CSR_MEPC;
+                        data_q      <= {epc_q[`INST_ADDR_WIDTH-1:2], 2'b00};
+                        csr_state_q <= S_TRAP_STATUS;
+                    end
+
+                    S_TRAP_STATUS: begin
+                        we_q        <= 1'b1;
+                        waddr_q     <= `CSR_MSTATUS;
+                        data_q      <= trap_mstatus(csr_clint_mstatus);
+                        csr_state_q <= S_TRAP_CAUSE;
+                    end
+
+                    S_TRAP_CAUSE: begin
+                        we_q        <= 1'b1;
+                        waddr_q     <= `CSR_MCAUSE;
+                        data_q      <= cause_q;
+                        csr_state_q <= S_TRAP_TVAL;
+                    end
+
+                    S_TRAP_TVAL: begin
+                        we_q         <= 1'b1;
+                        waddr_q      <= `CSR_MTVAL;
+                        data_q       <= tval_q;
+                        int_assert_q <= 1'b1;
+                        int_addr_q   <= {csr_clint_mtvec[`INST_ADDR_WIDTH-1:2], 2'b00};
+                        csr_state_q  <= S_IDLE;
+                    end
+
+                    S_MRET_STATUS: begin
+                        we_q         <= 1'b1;
+                        waddr_q      <= `CSR_MSTATUS;
+                        data_q       <= mret_mstatus(csr_clint_mstatus);
+                        int_assert_q <= 1'b1;
+                        int_addr_q   <= {csr_clint_mepc[`INST_ADDR_WIDTH-1:2], 2'b00};
+                        csr_state_q  <= S_IDLE;
+                    end
+
+                    default: begin
+                        csr_state_q <= S_IDLE;
+                    end
+                endcase
+            end
         end
     end
 
-
-    assign clint_csr_we_o = we_o;
-    assign clint_csr_waddr_o = waddr_o;
-    assign clint_csr_raddr_o = raddr_o;
-    assign clint_csr_data_o = data_o;
-    assign interrupt_o = int_assert;
-    assign clint_ex_int_addr_o = int_addr;
+    assign clint_csr_we_o       = we_q;
+    assign clint_csr_waddr_o    = waddr_q;
+    assign clint_csr_raddr_o    = raddr_q;
+    assign clint_csr_data_o     = data_q;
+    assign interrupt_o          = int_assert_q;
+    assign clint_ex_int_addr_o  = int_addr_q;
 
 endmodule

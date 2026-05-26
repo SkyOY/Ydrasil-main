@@ -21,7 +21,8 @@ module ydrasil_if_stage #(
 	// IF/ID 流水寄存器输出
 	output wire [31:0] if_id_pc_o,
 
-	output wire [31:0] if_id_instr_o
+	output wire [31:0] if_id_instr_o,
+	output wire        if_id_valid_o
 
 );
 
@@ -30,13 +31,17 @@ module ydrasil_if_stage #(
 
 	wire [31:0] pc_n;
 	wire [31:0] pc_plus4;
-	wire [31:0] if_id_instr;
+	wire [31:0] if_id_instr_n;
 	wire [31:0] pc_now;
 	reg [31:0] pc_ff;
 	reg [31:0] if_id_pc_ff;
 	reg [31:0] if_id_instr_ff;
-	reg flush_if_ff;
-	reg stall_if_ff;
+	reg        if_id_valid_ff;
+	reg [31:0] fetch_pc_ff;
+	reg        fetch_valid_ff;
+	reg [31:0] skid_pc_ff;
+	reg [31:0] skid_instr_ff;
+	reg        skid_valid_ff;
 
 	// 默认顺序取指地址：PC + 4
 	assign pc_plus4   = pc_ff + 32'd4;
@@ -46,11 +51,10 @@ module ydrasil_if_stage #(
 	assign if_mem_addr_o = pc_ff;
 
 	assign if_id_pc_o    = if_id_pc_ff;
+	assign if_id_instr_o = if_id_instr_ff;
+	assign if_id_valid_o = if_id_valid_ff;
 	assign pc_now =  pc_ff;
-	assign if_id_instr_o = if_id_instr;
-	assign if_id_instr = 
-		stall_if_ff? if_id_instr_ff :
-		flush_if_ff ? `RV32I_INS_NOP : if_mem_rdata_i;
+	assign if_id_instr_n = flush_if_i ? `RV32I_INS_NOP : if_mem_rdata_i;
 
 
 
@@ -70,17 +74,35 @@ module ydrasil_if_stage #(
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
 			if_id_pc_ff    <= `RESET_INS;
-			flush_if_ff     <= 1'b0;
 			if_id_instr_ff <= `RV32I_INS_NOP;
-			stall_if_ff    <= 1'b0;
+			if_id_valid_ff <= 1'b0;
+			fetch_pc_ff    <= `RESET_INS;
+			fetch_valid_ff <= 1'b0;
+			skid_pc_ff     <= `RESET_INS;
+			skid_instr_ff  <= `RV32I_INS_NOP;
+			skid_valid_ff  <= 1'b0;
 		end 
 		else begin
-			if(!stall_if_i) begin
-			if_id_pc_ff    <= pc_now;
-			flush_if_ff     <= flush_if_i;
+			if(stall_if_i) begin
+				if (!skid_valid_ff) begin
+					skid_pc_ff    <= fetch_pc_ff;
+					skid_instr_ff <= if_id_instr_n;
+					skid_valid_ff <= fetch_valid_ff & !flush_if_i;
+				end
+			end else if (skid_valid_ff) begin
+				if_id_pc_ff    <= skid_pc_ff;
+				if_id_instr_ff <= flush_if_i ? `RV32I_INS_NOP : skid_instr_ff;
+				if_id_valid_ff <= skid_valid_ff & !flush_if_i;
+				fetch_pc_ff    <= pc_now;
+				fetch_valid_ff <= !branch_jump_i;
+				skid_valid_ff  <= 1'b0;
+			end else begin
+				if_id_pc_ff    <= fetch_pc_ff;
+				if_id_instr_ff <= if_id_instr_n;
+				if_id_valid_ff <= fetch_valid_ff & !flush_if_i;
+				fetch_pc_ff    <= pc_now;
+				fetch_valid_ff <= !branch_jump_i;
 			end
-			if_id_instr_ff <= if_id_instr;
-			stall_if_ff    <= stall_if_i;
 		end
 	end
 
